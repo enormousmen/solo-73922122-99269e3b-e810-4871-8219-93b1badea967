@@ -37,3 +37,20 @@ MAX_HOOK_DELAY_MS: int = int(os.environ.get("MAX_HOOK_DELAY_MS", "120000"))
 CANCEL_SEND_WAIT_S: float = float(os.environ.get("CANCEL_SEND_WAIT_S", "180"))
 
 CONNECT_TIMEOUT_S: int = int(os.environ.get("CONNECT_TIMEOUT_S", "10"))
+
+# ---- WAL lag sampling endpoint -----------------------------------------------
+# The slot sampler never borrows the two fixed diagnostic long connections:
+# every request opens its own short-lived connection and closes it before the
+# response is returned.
+SAMPLE_CONNECT_TIMEOUT_S: float = float(
+    os.environ.get("SAMPLE_CONNECT_TIMEOUT_S", "5")
+)
+SAMPLE_STATEMENT_TIMEOUT_MS: int = int(
+    os.environ.get("SAMPLE_STATEMENT_TIMEOUT_MS", "5000")
+)
+# Allowed gap between the two samples (seconds), inclusive.
+SAMPLE_INTERVAL_MIN_S: float = float(os.environ.get("SAMPLE_INTERVAL_MIN_S", "1"))
+SAMPLE_INTERVAL_MAX_S: float = float(os.environ.get("SAMPLE_INTERVAL_MAX_S", "3"))
+SAMPLE_INTERVAL_DEFAULT_S: float = float(
+    os.environ.get("SAMPLE_INTERVAL_DEFAULT_S", "2")
+)

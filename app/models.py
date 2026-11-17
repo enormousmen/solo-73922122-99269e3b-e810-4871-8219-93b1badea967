@@ -111,3 +111,66 @@ class PoolStatus(BaseModel):
     size: int
     queue_depth: int
     connections: list[ConnectionStatus]
+
+
+# ---- replication-slot WAL lag sampling ------------------------------------
+
+
+class SlotSampleModel(BaseModel):
+    taken_at: str = Field(description="ISO-8601 UTC timestamp of the probe")
+    current_wal_lsn: str = Field(
+        description="pg_current_wal_lsn() at probe time, canonical X/XXXXXXXX text"
+    )
+    slot_name: str
+    slot_type: str  # physical|logical
+    active: bool
+    restart_lsn: str | None = Field(
+        description="Slot restart LSN as text; NULL means the slot has never "
+        "reserved WAL and is preserved as null (never interpreted as zero)."
+    )
+    wal_status: str | None = Field(
+        description="reserved|extended|unreserved|lost; NULL when restart_lsn is NULL"
+    )
+    safe_wal_size: int | None = Field(
+        description="Bytes of WAL that can still be consumed before the slot "
+        "would be invalidated; NULL means no finite limit "
+        "(max_slot_wal_keep_size = -1)."
+    )
+
+
+class SlotLagChange(BaseModel):
+    retained_bytes_sample_1: int
+    retained_bytes_sample_2: int
+    delta_retained_bytes: int = Field(
+        description="Net change of retained bytes (sample 2 minus sample 1)."
+    )
+    current_wal_lsn_advanced_bytes: int
+    restart_lsn_advanced_bytes: int
+
+
+class SlotLagEstimate(BaseModel):
+    estimation: str
+    caveat: str
+    net_growth_bytes_per_second: float
+    safe_wal_size_bytes: int
+    estimated_remaining_seconds: float
+    estimated_remaining_human: str
+
+
+class SlotLagResponse(BaseModel):
+    slot_name: str
+    status: str = Field(
+        description="estimated: a short-window extrapolation is included; "
+        "not_estimable: see reason/detail for why no countdown is given."
+    )
+    reason: str | None = Field(
+        description="Machine-readable reason when no estimate is possible "
+        "(slot_not_found, restart_lsn_null, wal_status_unreserved, "
+        "wal_status_lost, no_net_growth, no_retention_limit, ...)."
+    )
+    detail: str | None = None
+    interval_seconds: float
+    elapsed_seconds: float | None = None
+    samples: list[SlotSampleModel | None]
+    lag: SlotLagChange | None = None
+    estimate: SlotLagEstimate | None = None

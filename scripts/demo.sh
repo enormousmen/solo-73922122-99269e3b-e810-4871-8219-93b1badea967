@@ -76,3 +76,21 @@ curl -s -o /dev/null -w "cancel after finish -> HTTP %{http_code}\n" \
 echo
 echo "=== 6) explicit transaction control is rejected (422) ==="
 curl -s -XPOST "$BASE/jobs" -H "$JSON" -d '{"statements": ["BEGIN", "SELECT 1"]}' | pp
+
+echo
+echo "=== 7) replication-slot WAL lag sampling (dedicated connection, pool untouched) ==="
+echo "-- missing slot: explanatory reason, no estimate"
+curl -s "$BASE/replication-slots/no_such_slot/lag?interval=1" | pp
+echo "-- interval outside 1..3s is rejected:"
+curl -s -o /dev/null -w "interval=4 -> HTTP %{http_code}\n" \
+  "$BASE/replication-slots/whatever/lag?interval=4"
+echo "-- create a slot, then sample it (idle slot -> no_net_growth, no countdown):"
+JOB=$(curl -s -XPOST "$BASE/jobs" -H "$JSON" -d '{
+  "statements": ["SELECT pg_create_logical_replication_slot('"'"'demo_slot'"'"', '"'"'pgoutput'"'"')"]}' | jid)
+sleep 1
+curl -s "$BASE/replication-slots/demo_slot/lag?interval=2" | pp
+echo "-- cleanup:"
+JOB=$(curl -s -XPOST "$BASE/jobs" -H "$JSON" -d '{
+  "statements": ["SELECT pg_drop_replication_slot('"'"'demo_slot'"'"')"]}' | jid)
+sleep 1
+curl -s "$BASE/jobs/$JOB" | python3 -c "import json,sys;print('drop slot job:', json.load(sys.stdin)['status'])"

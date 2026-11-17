@@ -7,6 +7,9 @@ GET  /jobs                 list recent jobs
 GET  /jobs/{id}            job detail incl. per-statement results
 POST /jobs/{id}/cancel     cancel a queued/running job (202) ; 409 if finished
 GET  /pool                 state of the two pooled connections
+GET  /replication-slots/{name}/lag
+                           two-sample WAL retention probe for one slot
+                           (dedicated short-lived connection; pool untouched)
 GET  /health               liveness
 GET  /docs                 Swagger UI
 """
@@ -15,7 +18,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from . import config
@@ -25,10 +28,12 @@ from .models import (
     JobDetail,
     JobSummary,
     PoolStatus,
+    SlotLagResponse,
     SubmitRequest,
     SubmitResponse,
 )
 from .pool import Pool
+from .slotsampler import SampleError, sample_slot
 from .sqlguard import SqlRejected, check_statements
 from .store import TERMINAL_STATES, Job, JobStore, utcnow
 
@@ -177,3 +182,39 @@ def cancel_job(job_id: str, req: CancelRequest | None = None):
 @app.get("/pool", response_model=PoolStatus)
 def pool_status():
     return pool.status()
+
+
+@app.get(
+    "/replication-slots/{slot_name}/lag",
+    response_model=SlotLagResponse,
+    summary="Two-sample WAL retention probe for one replication slot",
+)
+def replication_slot_lag(
+    slot_name: str,
+    interval: float = Query(
+        default=config.SAMPLE_INTERVAL_DEFAULT_S,
+        ge=config.SAMPLE_INTERVAL_MIN_S,
+        le=config.SAMPLE_INTERVAL_MAX_S,
+        description=(
+            "Seconds between the two samples "
+            f"({config.SAMPLE_INTERVAL_MIN_S:g}..{config.SAMPLE_INTERVAL_MAX_S:g})."
+        ),
+    ),
+):
+    """Sample current WAL position and the slot's restart_lsn / wal_status /
+    safe_wal_size twice and report retained bytes plus the net change.
+
+    A remaining-time countdown is returned only when both samples are
+    comparable, the retained amount shows net growth, and a finite retention
+    limit exists. It is a short-window linear extrapolation and is labelled as
+    such. A shrinking lag (consumer catching up) never produces a countdown;
+    a missing slot, NULL restart_lsn, unreserved/lost status or an anomalous
+    position change yields an explanatory reason instead.
+
+    The probe opens its own short-lived connection and never borrows either of
+    the two fixed diagnostic connections, so jobs and cancels stay available.
+    """
+    try:
+        return sample_slot(slot_name, interval)
+    except SampleError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))

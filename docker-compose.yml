@@ -1,6 +1,17 @@
 services:
   db:
     image: postgres:16-alpine
+    # wal_level=logical enables logical replication slots for the lag
+    # sampler; a finite max_slot_wal_keep_size makes safe_wal_size a real
+    # number so the remaining-time extrapolation path is exercisable.
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_slot_wal_keep_size=64MB"
+      - "-c"
+      - "max_wal_size=128MB"
     environment:
       POSTGRES_DB: diag
       POSTGRES_USER: postgres
@@ -23,6 +34,11 @@ services:
       # global defaults for the test hooks (per-request overrides exist):
       # CANCEL_SEND_DELAY_MS: "0"
       # CLEANUP_DELAY_MS: "0"
+      # replication-slot lag sampler (dedicated short-lived connections):
+      # SAMPLE_INTERVAL_MIN_S: "1"
+      # SAMPLE_INTERVAL_MAX_S: "3"
+      # SAMPLE_CONNECT_TIMEOUT_S: "5"
+      # SAMPLE_STATEMENT_TIMEOUT_MS: "5000"
     depends_on:
       db:
         condition: service_healthy
